@@ -444,7 +444,7 @@ def main():
 
     # Init USV
     usv = USV(
-        init_state=USVState(x=30.0, y=30.0, yaw=math.radians(15.0), v=0.0, w=0.0),
+        init_state=USVState(x=30.0, y=30.0, yaw=math.radians(0.0), v=0.0, w=0.0),
         radius=cfg.robot_radius
     )
 
@@ -541,9 +541,9 @@ def main():
             cv2.imshow(win_name, img)
 
             key = cv2.waitKey(1) & 0xFF
-            if key in (27, ord('q')):
+            if key in (27, ord('q')) or goal_dist < 15 :
                 break
-            if key == ord('r'):
+            if key == ord('r') :
                 # reset
                 usv = USV(
                     init_state=USVState(x=30.0, y=30.0, yaw=math.radians(15.0), v=0.0, w=0.0),
