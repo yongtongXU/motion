@@ -16,7 +16,7 @@ GOAL = np.array([950.0, 950.0], dtype=float)
 GOAL_TOL = 15.0
 
 # USV 初始姿态/运动约束
-INIT_HEADING_DEG = 15.0      # 初始航向角（度），0度指向+x方向，逆时针为正
+INIT_HEADING_DEG = 45.0      # 初始航向角（度），0度指向+x方向，逆时针为正
 INIT_SPEED = 0.0             # 初始航速（m/s）
 USV_MAX_SPEED = 8.9
 USV_MAX_ACCEL = 2.5          # 最大加速（m/s^2）
@@ -26,7 +26,7 @@ USV_MAX_YAW_ACCEL = 2.0   # 最大角加速度（rad/s^2）
 YAW_P_GAIN = 1.8                         # 航向角控制比例增益
 
 USV_RADIUS = 12.0
-SAFE_MARGIN = 20.0
+SAFE_MARGIN = 15.0
 
 # 4个运动障碍物：海上十字路口（正南/正北/正东/正西各一艘）
 # 按“靠右通行”布置航道，并保持直线持续航行（不掉头、无边界反弹）
@@ -43,7 +43,11 @@ MAX_STEPS = 12000
 ATTR_GAIN = 2.4
 REP_GAIN = 22000.0
 REP_INFLUENCE_DIST = 150.0
-PREDICT_HORIZON = 1.2
+PREDICT_HORIZON = 1.5
+REDLINE_REP_GAIN = 90000.0
+HARD_REP_GAIN = 180000.0
+HARD_BRAKE_GAIN = 12.0
+MIN_REDLINE_BAND = 35.0
 
 
 stamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -87,6 +91,7 @@ def repulsive_force(usv_pos, usv_vel, obstacles):
     f_rep = np.zeros(2)
     for obs in obstacles:
         obs_pred = obs["pos"] + obs["vel"] * PREDICT_HORIZON
+        # obs_pred = obs["pos"]
         rel = usv_pos - obs_pred
         dist = np.linalg.norm(rel)
         safe_dist = obs["r"] + USV_RADIUS + SAFE_MARGIN
@@ -94,13 +99,33 @@ def repulsive_force(usv_pos, usv_vel, obstacles):
         if dist < 1e-6:
             continue
 
-        if dist < REP_INFLUENCE_DIST:
-            scale = REP_GAIN * (1.0 / dist - 1.0 / REP_INFLUENCE_DIST) / (dist * dist)
-            scale = max(scale, 0.0)
-            f_rep += scale * (rel / dist)
+        dir_away = rel / dist
+        clearance = dist - safe_dist
+        influence_band = max(REP_INFLUENCE_DIST - safe_dist, MIN_REDLINE_BAND)
+        redline_band = max(0.35 * safe_dist, MIN_REDLINE_BAND)
 
-        if dist < safe_dist * 1.25 and np.linalg.norm(usv_vel) > 1e-6:
-            f_rep += -0.6 * usv_vel / np.linalg.norm(usv_vel)
+        # 用“距离安全边界的剩余间隙”而不是“距离障碍中心的距离”来计算斥力，
+        # 让 safe_dist 成为不能触碰的硬红线。
+        if clearance <= 0.0:
+            penetration = -clearance + 1.0
+            f_rep += HARD_REP_GAIN * (1.0 + penetration / max(safe_dist, 1.0)) ** 2 * dir_away
+            closing_speed = max(0.0, np.dot(usv_vel, -dir_away))
+            if closing_speed > 0.0:
+                f_rep += HARD_BRAKE_GAIN * closing_speed * dir_away
+            continue
+
+        if clearance < influence_band:
+            clearance_eff = max(clearance, 1e-3)
+            scale = REP_GAIN * (1.0 / clearance_eff - 1.0 / influence_band) / (clearance_eff * clearance_eff)
+            scale = max(scale, 0.0)
+            f_rep += scale * dir_away
+
+        if clearance < redline_band:
+            clearance_eff = max(clearance, 1e-3)
+            f_rep += REDLINE_REP_GAIN / (clearance_eff * clearance_eff) * dir_away
+            closing_speed = max(0.0, np.dot(usv_vel, -dir_away))
+            if closing_speed > 0.0:
+                f_rep += HARD_BRAKE_GAIN * closing_speed * dir_away
 
     return f_rep
 
@@ -227,9 +252,7 @@ def export_animation_gif(usv_traj, obstacles_histories, out_dir, fps=20, stride=
         np.array([0, 120, 220], dtype=np.uint8),
     ]
 
-    total = len(usv_traj)
-    frame_idx = 0
-    for t in range(0, total, stride):
+    def render_frame(t):
         img = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 255
 
         x0, y0 = trans(np.array([0, 0]))
@@ -267,7 +290,12 @@ def export_animation_gif(usv_traj, obstacles_histories, out_dir, fps=20, stride=
         ux, uy = trans(usv_traj[t])
         _draw_circle(img, ux, uy, int(round(USV_RADIUS)), usv_safety_color, fill=False)
         _draw_circle(img, ux, uy, 5, usv_color, fill=True)
+        return img
 
+    total = len(usv_traj)
+    frame_idx = 0
+    for t in range(0, total, stride):
+        img = render_frame(t)
         ppm_path = os.path.join(frame_dir, f"frame_{frame_idx:05d}.ppm")
         with open(ppm_path, "wb") as f:
             h, w = img.shape[:2]
@@ -276,27 +304,7 @@ def export_animation_gif(usv_traj, obstacles_histories, out_dir, fps=20, stride=
         frame_idx += 1
 
     if (total - 1) % stride != 0:
-        t = total - 1
-        img = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 255
-        for i in range(1, t + 1):
-            x_prev, y_prev = trans(usv_traj[i - 1])
-            x_cur, y_cur = trans(usv_traj[i])
-            _draw_line(img, x_prev, y_prev, x_cur, y_cur, usv_color, thickness=1)
-        for j, hist in enumerate(obstacles_histories):
-            c = colors[j % len(colors)]
-            for i in range(1, len(hist)):
-                x_prev, y_prev = trans(hist[i - 1])
-                x_cur, y_cur = trans(hist[i])
-                _draw_line(img, x_prev, y_prev, x_cur, y_cur, c, thickness=1)
-            ox, oy = trans(hist[-1])
-            obs_r = int(round(OBSTACLES_INIT[j]["r"]))
-            safe_r = int(round(OBSTACLES_INIT[j]["r"] + USV_RADIUS + SAFE_MARGIN))
-            _draw_circle(img, ox, oy, safe_r, safety_color, fill=False)
-            _draw_circle(img, ox, oy, obs_r, c, fill=False)
-            _draw_circle(img, ox, oy, 4, c, fill=True)
-        ux, uy = trans(usv_traj[t])
-        _draw_circle(img, ux, uy, int(round(USV_RADIUS)), usv_safety_color, fill=False)
-        _draw_circle(img, ux, uy, 5, usv_color, fill=True)
+        img = render_frame(total - 1)
         ppm_path = os.path.join(frame_dir, f"frame_{frame_idx:05d}.ppm")
         with open(ppm_path, "wb") as f:
             h, w = img.shape[:2]
