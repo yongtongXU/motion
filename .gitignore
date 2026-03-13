@@ -1,0 +1,92 @@
+# =======================
+# macOS
+# =======================
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# macOS 文件系统产生的缓存
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems/
+
+# =======================
+# VSCode
+# =======================
+.vscode/
+.history/
+*.code-workspace
+
+# 但若你希望提交特定 VSCode 配置，可使用以下白名单：
+#!.vscode/settings.json
+#!.vscode/tasks.json
+#!.vscode/launch.json
+#!.vscode/extensions.json
+
+# =======================
+# Python
+# =======================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+.ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.coverage
+.coverage.*
+.cache/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Pyright
+.pyright/
+
+# Pylint
+.pylint.d/
+
+# =======================
+# Logs & temp files
+# =======================
+*.log
+*.tmp
+*.swp
+*.swo
+
+# =======================
+# Others (常见)
+# =======================
+.idea/               # JetBrains
+*.bak               # 备份文件

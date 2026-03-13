@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 from datetime import datetime
-
+import math
 import csv
 import numpy as np
 
@@ -21,8 +21,8 @@ INIT_SPEED = 0.0             # 初始航速（m/s）
 USV_MAX_SPEED = 8.9
 USV_MAX_ACCEL = 2.5          # 最大加速（m/s^2）
 USV_MAX_DECEL = 2.5          # 最大减速（m/s^2）
-USV_MAX_YAW_RATE = np.deg2rad(18.0)    # 最大角速度（rad/s）
-USV_MAX_YAW_ACCEL = np.deg2rad(25.0)   # 最大角加速度（rad/s^2）
+USV_MAX_YAW_RATE = 1.2    # 最大角速度（rad/s）
+USV_MAX_YAW_ACCEL = 2.0   # 最大角加速度（rad/s^2）
 YAW_P_GAIN = 1.8                         # 航向角控制比例增益
 
 USV_RADIUS = 12.0
@@ -33,8 +33,8 @@ SAFE_MARGIN = 20.0
 OBSTACLES_INIT = [
     {"name": "ship_north", "pos": np.array([500.0, 920.0], dtype=float), "vel": np.array([-0.1, -5.8], dtype=float), "r": 30.0},
     {"name": "ship_south", "pos": np.array([580.0, 80.0], dtype=float), "vel": np.array([0.1, 6.2], dtype=float), "r": 30.0},
-    {"name": "ship_east",  "pos": np.array([940.0, 270.0], dtype=float), "vel": np.array([-4.0, -0.1], dtype=float), "r": 28.0},
-    {"name": "ship_west",  "pos": np.array([80.0, 200.0], dtype=float), "vel": np.array([5.8, 0.1], dtype=float), "r": 28.0},
+    {"name": "ship_east",  "pos": np.array([940.0, 270.0], dtype=float), "vel": np.array([-4.0, -0.1], dtype=float), "r": 30.0},
+    {"name": "ship_west",  "pos": np.array([80.0, 200.0], dtype=float), "vel": np.array([5.8, 0.1], dtype=float), "r": 30.0},
 ]
 
 DT = 0.05
@@ -208,6 +208,8 @@ def _draw_circle(img, cx, cy, r, color, fill=False):
 def export_animation_gif(usv_traj, obstacles_histories, out_dir, fps=20, stride=4):
     canvas_size = 1100
     pad = 50
+    safety_color = np.array([255, 180, 0], dtype=np.uint8)
+    usv_safety_color = np.array([255, 120, 120], dtype=np.uint8)
 
     def trans(p):
         x = int(p[0] + pad)
@@ -251,6 +253,10 @@ def export_animation_gif(usv_traj, obstacles_histories, out_dir, fps=20, stride=
                 _draw_line(img, x_prev, y_prev, x_cur, y_cur, c, thickness=1)
 
             ox, oy = trans(hist[end_t])
+            obs_r = int(round(OBSTACLES_INIT[j]["r"]))
+            safe_r = int(round(OBSTACLES_INIT[j]["r"] + USV_RADIUS + SAFE_MARGIN))
+            _draw_circle(img, ox, oy, safe_r, safety_color, fill=False)
+            _draw_circle(img, ox, oy, obs_r, c, fill=False)
             _draw_circle(img, ox, oy, 4, c, fill=True)
 
         sx, sy = trans(START)
@@ -259,6 +265,7 @@ def export_animation_gif(usv_traj, obstacles_histories, out_dir, fps=20, stride=
         _draw_circle(img, gx, gy, 6, np.array([0, 180, 0], dtype=np.uint8), fill=True)
 
         ux, uy = trans(usv_traj[t])
+        _draw_circle(img, ux, uy, int(round(USV_RADIUS)), usv_safety_color, fill=False)
         _draw_circle(img, ux, uy, 5, usv_color, fill=True)
 
         ppm_path = os.path.join(frame_dir, f"frame_{frame_idx:05d}.ppm")
@@ -281,6 +288,15 @@ def export_animation_gif(usv_traj, obstacles_histories, out_dir, fps=20, stride=
                 x_prev, y_prev = trans(hist[i - 1])
                 x_cur, y_cur = trans(hist[i])
                 _draw_line(img, x_prev, y_prev, x_cur, y_cur, c, thickness=1)
+            ox, oy = trans(hist[-1])
+            obs_r = int(round(OBSTACLES_INIT[j]["r"]))
+            safe_r = int(round(OBSTACLES_INIT[j]["r"] + USV_RADIUS + SAFE_MARGIN))
+            _draw_circle(img, ox, oy, safe_r, safety_color, fill=False)
+            _draw_circle(img, ox, oy, obs_r, c, fill=False)
+            _draw_circle(img, ox, oy, 4, c, fill=True)
+        ux, uy = trans(usv_traj[t])
+        _draw_circle(img, ux, uy, int(round(USV_RADIUS)), usv_safety_color, fill=False)
+        _draw_circle(img, ux, uy, 5, usv_color, fill=True)
         ppm_path = os.path.join(frame_dir, f"frame_{frame_idx:05d}.ppm")
         with open(ppm_path, "wb") as f:
             h, w = img.shape[:2]
