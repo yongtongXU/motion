@@ -46,13 +46,17 @@ class DWAConfig:
     w_res: float = 0.08
 
     # Forward simulation
-    dt: float = 0.1
+    dt: float = 0.1  
+    # 时间步长在这里设置；主循环更新、轨迹预测、障碍物运动都使用这个 dt
     predict_time: float = 3.0
 
     # Cost weights
     w_goal: float = 1.0
     w_speed: float = 0.2
     w_clearance: float = 1.4
+    w_heading: float = 0.18
+    w_yaw_rate: float = 0.12
+    w_yaw_change: float = 0.20
 
     # Robot safety (meters)
     robot_radius: float = 6.0
@@ -61,6 +65,8 @@ class DWAConfig:
     # Clearance shaping
     clearance_floor: float = 0.02
     collision_penalty: float = 1e9
+    smooth_clearance_start: float = 80.0
+    smooth_clearance_full: float = 180.0
 
 
 @dataclass
@@ -287,6 +293,23 @@ class DWAPlanner:
         dy = float(traj[-1, 1] - gy)
         return math.hypot(dx, dy)
 
+    def _heading_cost(self, traj: np.ndarray, goal: Tuple[float, float]) -> float:
+        gx, gy = goal
+        end_x = float(traj[-1, 0])
+        end_y = float(traj[-1, 1])
+        end_yaw = float(traj[-1, 2])
+        goal_yaw = math.atan2(gy - end_y, gx - end_x)
+        return abs(wrap_to_pi(goal_yaw - end_yaw))
+
+    def _smooth_gain(self, min_clear: float) -> float:
+        cfg = self.cfg
+        if min_clear <= cfg.smooth_clearance_start:
+            return 0.0
+        if min_clear >= cfg.smooth_clearance_full:
+            return 1.0
+        span = cfg.smooth_clearance_full - cfg.smooth_clearance_start
+        return (min_clear - cfg.smooth_clearance_start) / max(span, 1e-6)
+
     def plan(self, state: USVState, goal: Tuple[float, float], obstacles: List[Obstacle]) -> Tuple[float, float, np.ndarray, float]:
         cfg = self.cfg
         v_min, v_max, w_min, w_max = self._dynamic_window(state)
@@ -316,7 +339,20 @@ class DWAPlanner:
                     c_goal = self._goal_cost(traj, goal)
                     c_speed = (cfg.v_max - float(v))  # 越快越好
                     c_clear = 1.0 / max(min_clear, cfg.clearance_floor)
-                    cost = cfg.w_goal * c_goal + cfg.w_speed * c_speed + cfg.w_clearance * c_clear
+                    c_heading = self._heading_cost(traj, goal)
+                    smooth_gain = self._smooth_gain(min_clear)
+                    c_yaw_rate = abs(float(w))
+                    c_yaw_change = abs(float(w) - state.w)
+                    cost = (
+                        cfg.w_goal * c_goal
+                        + cfg.w_speed * c_speed
+                        + cfg.w_clearance * c_clear
+                        + smooth_gain * (
+                            cfg.w_heading * c_heading
+                            + cfg.w_yaw_rate * c_yaw_rate
+                            + cfg.w_yaw_change * c_yaw_change
+                        )
+                    )
 
                 if cost < best_cost:
                     best_cost = cost
@@ -541,7 +577,7 @@ def main():
             cv2.imshow(win_name, img)
 
             key = cv2.waitKey(1) & 0xFF
-            if key in (27, ord('q')):
+            if key in (27, ord('q')) or goal_dist < 15 :
                 break
             if key == ord('r'):
                 # reset
